@@ -1,8 +1,13 @@
-run: boot.img
+.SUFFIXES: .nas .o
+
+.nas.o:
+	nasm $< -f bin -o $@
+
+run: kernel.img
 	qemu-system-x86_64 -fda $<
 
-boot.img: boot.nas
-	nasm -f bin -o $@ $<
+kernel.img: boot.o kernel.o
+	cat $? > $@
 
-clean: boot.img
-	rm $<
+clean:
+	rm *.img *.o
