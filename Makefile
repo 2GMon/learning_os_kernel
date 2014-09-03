@@ -7,7 +7,7 @@ run: kernel.img
 	qemu-system-x86_64 -fda $<
 
 kernel.img: boot.o kernel.o
-	cat $? > $@
+	cat $^ > $@
 
 clean:
 	rm *.img *.o
