@@ -44,6 +44,13 @@ read:
     nop
     nop
 
+    mov     bx, SysDataSelector
+    mov     ds, bx
+    mov     es, bx
+    mov     fs, bx
+    mov     gs, bx
+    mov     ss, bx
+
     jmp     dword SysCodeSelector:0x10000
 
     msgBack db '.', 0x67
