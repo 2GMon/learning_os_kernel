@@ -110,7 +110,7 @@ isr_32_timer:
     pushfd
 
     mov     al, 0x20
-    out     0x20, al
+    out     0x20, al                ; 正常に動いているが、PICのリセットは0x21に書き込むんじゃないか？と思いつつ…
 
     mov     ax, VideoSelector
     mov     es, ax
