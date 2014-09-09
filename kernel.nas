@@ -1,6 +1,43 @@
 %include "init.inc"
 
 [org 0x10000]
+[bits 16]
+
+start:
+    cld                                 ; Advance = inc
+    mov     ax, cs
+    mov     ds, ax
+    xor     ax, ax
+    mov     ss, ax
+
+    xor     ebx, ebx
+    lea     eax, [tss1]                 ; EAXにtss1の物理アドレスを入れる
+    add     eax, 0x10000
+    mov     [descriptor4+2], ax
+    shr     eax, 16
+    mov     [descriptor4+4], al
+    mov     [descriptor4+7], ah
+
+    lea     eax, [tss2]                 ; EAXにtss2の物理アドレスを入れる
+    add     eax, 0x10000
+    mov     [descriptor5+2], ax
+    shr     eax, 16
+    mov     [descriptor5+4], al
+    mov     [descriptor5+7], ah
+
+    cli
+    lgdt    [gdtr]
+
+    mov     eax, cr0
+    or      eax, 0x00000001
+    mov     cr0, eax
+
+    jmp     $+2
+    nop
+    nop
+
+    jmp     dword SysCodeSelector:PM_Start
+
 [bits 32]
 
 PM_Start:
@@ -10,36 +47,26 @@ PM_Start:
     mov     fs, bx
     mov     gs, bx
     mov     ss, bx
+
     lea     esp, [PM_Start]
 
-    mov     edi, 0
-    lea     esi, [msgPMode]
+    mov     ax, TSS1Selector
+    ltr     ax
+    lea     eax, [process2]
+    mov     [tss2_eip], eax
+    mov     [tss2_esp], esp
+
+    jmp     TSS2Selector:0
+    ; 再びタスクスイッチングされるとここに戻る
+
+    mov     edi, 80*2*9
+    lea     esi, [msg_process1]
     call    printf
+    jmp     $
 
-    cld
-    mov     ax, SysDataSelector
-    mov     es, ax
-    xor     eax, eax
-    xor     ecx, ecx
-    mov     ax, 256                     ; IDT領域に256個の
-    mov     edi, 0                      ; ディスクリプタをコピーする
-
-loop_idt:
-    lea     esi, [idt_ignore]
-    mov     cx, 8
-    rep     movsb
-    dec     ax
-    jnz     loop_idt
-
-    lidt    [idtr]
-
-    sti
-    int     0x77
-    jmp $
-
-;;;;;;;;;;;;;;;;
-; Sub Routines ;
-;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;
+; Subroutines ;
+;;;;;;;;;;;;;;;
 printf:
     push    eax
     push    es
@@ -62,51 +89,89 @@ printf_end:
     pop     eax
     ret
 
+process2:
+    mov     edi, 80*2*7
+    lea     esi, [msg_process2]
+    call    printf
+    jmp     TSS1Selector:0
+
 ;;;;;;;;;;;;;
 ; Data Area ;
 ;;;;;;;;;;;;;
+msg_process1    db  "This is System Process 1", 0
+msg_process2    db  "This is System Process 2", 0
 
-msgPMode    db  "We are in Protected Mode", 0
-msg_isr_ignore  db  "This is an ignorable interrupt", 0
-msg_isr_32_timer    db  ".This is the timer interrupt", 0
+gdtr:
+    dw      gdt_end - gdt - 1   ; GDTのlimit
+    dd      gdt                 ; GDTのベースアドレス
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; Interrupt Service Routines ;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-isr_ignore:
-    push    gs
-    push    fs
-    push    es
-    push    ds
-    pushad
-    pushfd
+gdt:
+    dd      0, 0
+    dd      0x0000FFFF, 0x00CF9A00
+    dd      0x0000FFFF, 0x00CF9200
+    dd      0x8000FFFF, 0x0040920B
 
-    mov     ax, VideoSelector
-    mov     es, ax
-    mov     edi, (80 * 7 * 2)
-    lea     esi, [msg_isr_ignore]
-    call    printf
-
-    popfd
-    popad
-    pop     ds
-    pop     es
-    pop     fs
-    pop     gs
-
-    iret
-
-;;;;;;;
-; IDT ;
-;;;;;;;
-idtr:
-    dw      256 * 8 - 1             ; IDTのLimit
-    dd      0                       ; IDTのベースアドレス
-idt_ignore:
-    dw      isr_ignore
-    dw      SysCodeSelector
+descriptor4:
+    dw      104
+    dw      0
     db      0
-    db      0x8E
-    dw      0x0001
+    db      0x89
+    db      0
+    db      0
 
-times   512-($-$$) db 0
+descriptor5:
+    dw      104
+    dw      0
+    db      0
+    db      0x89
+    db      0
+    db      0
+
+gdt_end:
+
+tss1:
+    dw      0, 0                        ; 以前のタスクへback link
+    dd      0                           ; ESP0
+    dw      0, 0                        ; SS0, 使用なし
+    dd      0                           ; ESP1
+    dw      0, 0                        ; SS1, 使用なし
+    dd      0                           ; ESP2
+    dw      0, 0                        ; SS2, 使用なし
+    dd      0, 0, 0                     ; CR3, EIP, EFLAGS
+    dd      0, 0, 0, 0                  ; EAX, ECX, EDX, EBX
+    dd      0, 0, 0, 0                  ; ESP, EBP, ESI, EDI
+    dw      0, 0                        ; ES, 使用なし
+    dw      0, 0                        ; CS, 使用なし
+    dw      0, 0                        ; SS, 使用なし
+    dw      0, 0                        ; DS, 使用なし
+    dw      0, 0                        ; FS, 使用なし
+    dw      0, 0                        ; GS, 使用なし
+    dw      0, 0                        ; LDT, 使用なし
+    dw      0, 0                        ; デバッグ用のTビット, IO許可ビットマップ
+
+tss2:
+    dw      0, 0                        ; 以前のタスクへのback link
+    dd      0                           ; ESP0
+    dw      0, 0                        ; SS0, 使用なし
+    dd      0                           ; ESP1
+    dw      0, 0                        ; SS1, 使用なし
+    dd      0                           ; ESP2
+    dw      0, 0                        ; SS2, 使用なし
+    dd      0
+
+tss2_eip:
+    dd      0, 0                        ; EIP, EFLAGS (EFLAGS=0x200 for ints)
+    dd      0, 0, 0, 0
+
+tss2_esp:
+    dd      0, 0, 0, 0                  ; ESP, EBP, ESI, EDI
+    dw      SysDataSelector, 0          ; ES, 使用なし
+    dw      SysCodeSelector, 0          ; CS, 使用なし
+    dw      SysDataSelector, 0          ; SS, 使用なし
+    dw      SysDataSelector, 0          ; DS, 使用なし
+    dw      SysDataSelector, 0          ; FS, 使用なし
+    dw      SysDataSelector, 0          ; GS, 使用なし
+    dw      0, 0                        ; LDT, 使用なし
+    dw      0, 0                        ; デバッグ用のTビット, IO許可ビットマップ
+
+times   1024-($-$$) db 0
