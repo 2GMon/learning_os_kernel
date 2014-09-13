@@ -4,26 +4,27 @@
 [bits 16]
 
 start:
-    cld                                 ; Advance = inc
+    cld
     mov     ax, cs
     mov     ds, ax
     xor     ax, ax
     mov     ss, ax
 
-    xor     ebx, ebx
-    lea     eax, [tss1]                 ; EAXにtss1の物理アドレスを入れる
+    xor     eax, eax
+    lea     eax, [tss]                 ; EAXにtss1の物理アドレスを入れる
     add     eax, 0x10000
     mov     [descriptor4+2], ax
     shr     eax, 16
     mov     [descriptor4+4], al
     mov     [descriptor4+7], ah
 
-    lea     eax, [tss2]                 ; EAXにtss2の物理アドレスを入れる
+    xor     eax, eax
+    lea     eax, [printf]               ; EAXにprintf関数のアドレスを入れる
     add     eax, 0x10000
-    mov     [descriptor5+2], ax
+    mov     [descriptor7], ax
     shr     eax, 16
-    mov     [descriptor5+4], al
-    mov     [descriptor5+7], ah
+    mov     [descriptor7+6], al
+    mov     [descriptor7+7], ah
 
     cli
     lgdt    [gdtr]
@@ -50,28 +51,40 @@ PM_Start:
 
     lea     esp, [PM_Start]
 
-    mov     ax, TSS1Selector
+    mov     ax, TSSSelector
     ltr     ax
-    lea     eax, [process2]
-    mov     [tss2_eip], eax
-    mov     [tss2_esp], esp
 
-    jmp     TSS2Selector:0
-    ; 再びタスクスイッチングされるとここに戻る
+    mov     [tss_esp0], esp             ; 特権レベル0のスタックをTSSに指定しておく
+    lea     eax, [PM_Start-256]
+    mov     [tss_esp], eax              ; 特権レベル3のスタックをTSSに指定しておく
 
-    mov     edi, 80*2*9
-    lea     esi, [msg_process1]
-    call    printf
-    jmp     $
+    mov     ax, UserDataSelector        ; データセグメントをユーザモードに指定しておく
+    mov     ds, ax
+    mov     es, ax
+    mov     fs, ax
+    mov     gs, ax
+
+    lea     esp, [PM_Start-256]
+
+    push    dword UserDataSelector      ; SS
+    push    esp                         ; ESP
+    push    dword 0x200                 ; EFLAGS
+    push    dword UserCodeSelector      ; CS
+    lea     eax, [user_process]
+    push    eax                         ; EIP
+    iretd                               ; ユーザモードタスクにジャンプ
 
 ;;;;;;;;;;;;;;;
 ; Subroutines ;
 ;;;;;;;;;;;;;;;
 printf:
-    push    eax
+    mov     ebp, esp
     push    es
+    push    eax
     mov     ax, VideoSelector
     mov     es, ax
+    mov     esi, [ebp+8]
+    mov     edi, [ebp+12]
 
 printf_loop:
     mov     al, byte [esi]
@@ -85,21 +98,22 @@ printf_loop:
     jmp     printf_loop
 
 printf_end:
-    pop     es
     pop     eax
+    pop     es
     ret
 
-process2:
+user_process:
     mov     edi, 80*2*7
-    lea     esi, [msg_process2]
-    call    printf
-    jmp     TSS1Selector:0
+    push    edi                         ; 引数をユーザモードスタックに保存する
+    lea     eax, [msg_user_parameter1]
+    push    eax
+    call    0x38:0                      ; コールゲートを通じてカーネルルーチンを呼び出す
+    jmp     $
 
 ;;;;;;;;;;;;;
 ; Data Area ;
 ;;;;;;;;;;;;;
-msg_process1    db  "This is System Process 1", 0
-msg_process2    db  "This is System Process 2", 0
+msg_user_parameter1    db  "This is User Parameter1", 0
 
 gdtr:
     dw      gdt_end - gdt - 1   ; GDTのlimit
@@ -119,58 +133,43 @@ descriptor4:
     db      0
     db      0
 
-descriptor5:
-    dw      104
+    dd      0x0000FFFF, 0x00FCFA00      ; ユーザーコードセグメント
+    dd      0x0000FFFF, 0x00FCF200      ; ユーザーデータセグメント
+
+descriptor7:
     dw      0
-    db      0
-    db      0x89
+    dw      SysCodeSelector
+    db      0x02
+    db      0xEC
     db      0
     db      0
 
 gdt_end:
 
-tss1:
+tss:
     dw      0, 0                        ; 以前のタスクへback link
-    dd      0                           ; ESP0
-    dw      0, 0                        ; SS0, 使用なし
-    dd      0                           ; ESP1
-    dw      0, 0                        ; SS1, 使用なし
-    dd      0                           ; ESP2
-    dw      0, 0                        ; SS2, 使用なし
-    dd      0, 0, 0                     ; CR3, EIP, EFLAGS
-    dd      0, 0, 0, 0                  ; EAX, ECX, EDX, EBX
-    dd      0, 0, 0, 0                  ; ESP, EBP, ESI, EDI
-    dw      0, 0                        ; ES, 使用なし
-    dw      0, 0                        ; CS, 使用なし
-    dw      0, 0                        ; SS, 使用なし
-    dw      0, 0                        ; DS, 使用なし
-    dw      0, 0                        ; FS, 使用なし
-    dw      0, 0                        ; GS, 使用なし
-    dw      0, 0                        ; LDT, 使用なし
-    dw      0, 0                        ; デバッグ用のTビット, IO許可ビットマップ
 
-tss2:
-    dw      0, 0                        ; 以前のタスクへのback link
+tss_esp0:
     dd      0                           ; ESP0
-    dw      0, 0                        ; SS0, 使用なし
+    dw      SysDataSelector, 0          ; SS0, 使用なし
     dd      0                           ; ESP1
     dw      0, 0                        ; SS1, 使用なし
     dd      0                           ; ESP2
     dw      0, 0                        ; SS2, 使用なし
     dd      0
 
-tss2_eip:
-    dd      0, 0                        ; EIP, EFLAGS (EFLAGS=0x200 for ints)
+tss_eip:
+    dd      0, 0                        ; EIP, EFLAGS
     dd      0, 0, 0, 0
 
-tss2_esp:
+tss_esp:
     dd      0, 0, 0, 0                  ; ESP, EBP, ESI, EDI
-    dw      SysDataSelector, 0          ; ES, 使用なし
-    dw      SysCodeSelector, 0          ; CS, 使用なし
-    dw      SysDataSelector, 0          ; SS, 使用なし
-    dw      SysDataSelector, 0          ; DS, 使用なし
-    dw      SysDataSelector, 0          ; FS, 使用なし
-    dw      SysDataSelector, 0          ; GS, 使用なし
+    dw      0, 0                        ; ES, 使用なし
+    dw      0, 0                        ; CS, 使用なし
+    dw      UserDataSelector, 0         ; SS, 使用なし
+    dw      0, 0                        ; DS, 使用なし
+    dw      0, 0                        ; FS, 使用なし
+    dw      0, 0                        ; GS, 使用なし
     dw      0, 0                        ; LDT, 使用なし
     dw      0, 0                        ; デバッグ用のTビット, IO許可ビットマップ
 

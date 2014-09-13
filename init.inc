@@ -1,5 +1,6 @@
 SysCodeSelector equ     0x08
 SysDataSelector equ     0x10
 VideoSelector   equ     0x18
-TSS1Selector    equ     0x20
-TSS2Selector    equ     0x28
+TSSSelector     equ     0x20
+UserCodeSelector    equ 0x28+3
+UserDataSelector    equ 0x30+3
