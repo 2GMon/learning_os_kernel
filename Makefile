@@ -6,7 +6,7 @@
 run: kernel.img
 	qemu-system-x86_64 -fda $<
 
-kernel.img: boot_5_user_tasks.o kernel_5_user_tasks.o
+kernel.img: boot.o bootA20.o
 	cat $^ > $@
 
 clean:
